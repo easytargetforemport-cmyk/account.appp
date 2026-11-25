@@ -1,0 +1,8 @@
+{
+  "appId": "com.accounts.app",
+  "appName": "الحسابات",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}
