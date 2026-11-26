@@ -1,5 +1,5 @@
 // غيّر رقم النسخة عند كل تحديث لـ index.html عشان الموبايل ياخد التحديث
-const CACHE = 'accounts-v37';
+const CACHE = 'accounts-v39';
 const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });

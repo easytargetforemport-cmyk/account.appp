@@ -536,7 +536,7 @@ let db = (() => {
   return o || {};
 })();
 Object.keys(M).forEach(k => db[k] = db[k] || []);
-['quotes','reservations','deliveries','receipts','erpLog'].forEach(k => db[k] = db[k] || []);
+['quotes','reservations','deliveries','receipts','erpLog','syncConflicts'].forEach(k => db[k] = db[k] || []);
 db.cfg = db.cfg || {name:'شركتي', dark:0};
 let cur = 'dash', mk = '', editId = null, sp = {}, rk = 'sales', rf = '', rt = '';
 const store0 = () => { try { numberInvoices(); track(); } catch (e) {} try { localStorage.setItem('acc2', JSON.stringify(db)); } catch (e) { alert('تعذر حفظ البيانات! المساحة ممتلئة أو التخزين غير متاح. خذ نسخة احتياطية الآن'); } if (window.api) { try { window.api.save(JSON.stringify(db)); } catch (e) {} } clearTimeout(ftm); ftm = setTimeout(() => fsWrite(), 600); try { syncSoon(); } catch (e) {} };
@@ -1139,16 +1139,23 @@ function sanitizeDb(n, withM){
     if (!o.id) o.id = Date.now() + Math.random().toString(36).slice(2, 5);
     return o; }); });
   ['quotes','reservations','deliveries','receipts','erpLog'].forEach(k=>{out[k]=(Array.isArray(n[k])?n[k]:[]).filter(r=>r&&typeof r==='object'&&!Array.isArray(r)).map(r=>{const o={};for(const f in r){if(!/^\w{1,30}$/.test(f))continue;const v=r[f];if(['qty','price','total','used','released','amount','at'].includes(f)&&typeof v==='number')o[f]=isFinite(v)?v:0;else if(typeof v==='string')o[f]=v.slice(0,300);else if(typeof v==='number')o[f]=isFinite(v)?v:0;else if(typeof v==='boolean')o[f]=v;}if(!o.id)o.id=Date.now()+Math.random().toString(36).slice(2,5);return o;});});
+  // سجل التعارضات يحتفظ بالنسخ الكاملة (قبل التعديل، والفرعين المتعارضين) بدل اختزالها لملخص نصي.
+  out.syncConflicts = (Array.isArray(n.syncConflicts) ? n.syncConflicts : []).filter(x => x && typeof x == 'object' && !Array.isArray(x)).map(x => { try { const z = JSON.parse(JSON.stringify(x)); return z && typeof z.id == 'string' && z.id.length <= 100 ? z : null; } catch(e) { return null; } }).filter(Boolean);
   out._del = {};
-  [...Object.keys(M),'quotes','reservations','deliveries','receipts','erpLog'].forEach(c => { out._del[c] = {}; const d = n._del && n._del[c]; if (d && typeof d == 'object') for (const id in d) { const x = parseFloat(d[id]); if (/^[\w.\-:@+]{1,80}$/.test(id) && isFinite(x)) out._del[c][id] = x; } });
+  [...Object.keys(M),'quotes','reservations','deliveries','receipts','erpLog','syncConflicts'].forEach(c => { out._del[c] = {}; const d = n._del && n._del[c]; if (d && typeof d == 'object') for (const id in d) { const x = parseFloat(d[id]); if (/^[\w.\-:@+]{1,80}$/.test(id) && isFinite(x)) out._del[c][id] = x; } });
   const c = n.cfg && typeof n.cfg == 'object' && !Array.isArray(n.cfg) ? n.cfg : {};
   out.cfg = {name: String(c.name == null ? 'شركتي' : c.name).slice(0, 120), dark: c.dark ? 1 : 0};
   ['cash0', 'bk', 'glast'].forEach(f => { if (f in c) { const x = parseFloat(c[f]); out.cfg[f] = isFinite(x) ? x : 0; } });
   if (okLogo(c.logo)) out.cfg.logo = c.logo;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(String(c.closeDate))) out.cfg.closeDate = c.closeDate;
-  if (Array.isArray(c.users)) out.cfg.users = c.users.filter(u => u && typeof u.u == 'string' && /^\w{8,64}$/.test(String(u.s)) && /^[0-9a-f]{32,128}$/.test(String(u.h)) && ['accountant', 'cashier', 'viewer'].includes(u.role)).slice(0, 100).map(u => ({u: u.u.trim().slice(0, 60), s: u.s, h: u.h, role: u.role})).filter(u => u.u);
+  if (c.closeDate === '' || /^\d{4}-\d{2}-\d{2}$/.test(String(c.closeDate))) out.cfg.closeDate = c.closeDate;
+  if (Array.isArray(c.users)) out.cfg.users = c.users.filter(u => u && typeof u.u == 'string' && u.u.trim().length >= 3 && u.u.trim().length <= 60 && /^[0-9a-f]{32,128}$/i.test(String(u.s)) && /^[0-9a-f]{32,128}$/i.test(String(u.h)) && ['accountant', 'cashier', 'viewer'].includes(u.role)).slice(0, 100).map(u => ({u: u.u.trim().slice(0, 60), s: u.s, h: u.h, role: u.role}));
   if (Array.isArray(c.locs)) out.cfg.locs = c.locs.filter(l => l && typeof l == 'object').slice(0, 50).map(l => ({id: String(l.id == null ? '' : l.id).replace(/[^\w]/g, '').slice(0, 40), name: String(l.name == null ? '' : l.name).slice(0, 80)})).filter(l => l.id && l.name);
-  if (withM && n.cfgM && typeof n.cfgM == 'object') { out.cfgM = {}; for (const f in n.cfgM) { const x = parseFloat(n.cfgM[f]); if (/^\w{1,20}$/.test(f) && isFinite(x)) out.cfgM[f] = x; } }
+  if (withM && typeof n.cfgM == 'number' && isFinite(n.cfgM)) { out.cfgM = {}; ['name','dark','logo','cash0','closeDate','users','locs'].forEach(f => out.cfgM[f] = n.cfgM); }
+  else if (withM && n.cfgM && typeof n.cfgM == 'object') { out.cfgM = {}; for (const f in n.cfgM) { const x = parseFloat(n.cfgM[f]); if (/^\w{1,20}$/.test(f) && isFinite(x)) out.cfgM[f] = x; } }
+  // الاحتفاظ ببيانات الإعدادات المشتركة القادمة من السيرفر؛ sanitizeDb كان يسقط shared بالكامل.
+  const sh = n.shared && typeof n.shared == 'object' ? n.shared : {};
+  out.shared = {cfg: sharedConfig(out.cfg), cfgM: out.cfgM || (sh.cfgM && typeof sh.cfgM == 'object' ? sh.cfgM : {})};
+  if (sh.m !== undefined) { out.shared.m = +sh.m || 0; out.shared.name = String(sh.name || out.cfg.name || 'شركتي'); out.shared.cash0 = +sh.cash0 || 0; out.shared.locs = Array.isArray(sh.locs) ? sh.locs : (out.cfg.locs || []); out.shared.closeDate = sh.closeDate || ''; if (!sh.cfg) out.shared.cfg = Object.assign({}, out.shared.cfg, {name: out.shared.name, cash0: out.shared.cash0, locs: out.shared.locs, closeDate: out.shared.closeDate}); }
   return out;
 }
 function adopt(n){
@@ -1335,18 +1342,26 @@ if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform
 // الفكرة: كل سجل له رقم فريد + وقت آخر تعديل (_m). الحذف بيتسجّل كـ "شاهد حذف" في db._del.
 // عند المزامنة بنقارن سجل بسجل: الأحدث يكسب، والفواتير الجديدة من الجهازين بتتجمّع، والمخزون بيتحسب من الحركات.
 let snap = null, syncTimer = 0;
-const SYNC_COLS = Object.keys(M).concat(['quotes','reservations','deliveries','receipts','erpLog']);
+const SYNC_COLS = Object.keys(M).concat(['quotes','reservations','deliveries','receipts','erpLog','syncConflicts']);
 const jx = r => JSON.stringify(r, (k, v) => k == '_m' ? undefined : v);
-function snapAll(){ snap = {}; SYNC_COLS.forEach(c => { snap[c] = {}; db[c].forEach(r => snap[c][r.id] = jx(r)); }); snap.cfg = jx({n: db.cfg.name, c: db.cfg.cash0, d: db.cfg.closeDate || ''}); }
+const CFG_SYNC_FIELDS = ['name','dark','logo','cash0','closeDate','users','locs'];
+const cloneSync = v => v == null ? v : JSON.parse(JSON.stringify(v));
+function sharedConfig(c){ c = c || {}; return {name: String(c.name == null ? 'شركتي' : c.name), dark: c.dark ? 1 : 0, logo: c.logo || null, cash0: isFinite(+c.cash0) ? +c.cash0 : 0, closeDate: c.closeDate || '', users: Array.isArray(c.users) ? cloneSync(c.users) : [], locs: Array.isArray(c.locs) ? cloneSync(c.locs) : []}; }
+function cfgStamp(meta, key, legacy){ return meta && typeof meta == 'object' && Object.prototype.hasOwnProperty.call(meta, key) ? (+meta[key] || 0) : (+legacy || 0); }
+function snapAll(){ if (typeof db.cfgM == 'number') { const legacy = db.cfgM; db.cfgM = {}; CFG_SYNC_FIELDS.forEach(k => db.cfgM[k] = legacy); } snap = {}; SYNC_COLS.forEach(c => { snap[c] = {}; db[c].forEach(r => snap[c][r.id] = jx(r)); }); snap.cfg = jx(sharedConfig(db.cfg)); }
 function track(){            // بيتنادى قبل كل حفظ: يحدد السجلات اللي اتعدلت أو اتحذفت
   if (!snap) return snapAll();
   const now = NOWS(); db._del = db._del || {};
+  let baseRows = {}; try { baseRows = JSON.parse(localStorage.getItem('acc_base_rows') || '{}'); } catch(e) {}
   SYNC_COLS.forEach(c => {
     const cur = {}; db._del[c] = db._del[c] || {}; snap[c] = snap[c] || {};
-    db[c].forEach(r => { const j = jx(r); cur[r.id] = 1; if (snap[c][r.id] !== j) r._m = now; delete db._del[c][r.id]; });
+    db[c].forEach(r => { const j = jx(r); cur[r.id] = 1; if (snap[c][r.id] !== j) { if (c !== 'syncConflicts' && snap[c][r.id] && !baseRows[c + '|' + r.id]) { try { baseRows[c + '|' + r.id] = JSON.parse(snap[c][r.id]); } catch(e) {} } r._m = now; } delete db._del[c][r.id]; });
     Object.keys(snap[c]).forEach(id => { if (!cur[id]) db._del[c][id] = now; });
   });
-  const cj = jx({n: db.cfg.name, c: db.cfg.cash0, d: db.cfg.closeDate || ''}); if (cj !== snap.cfg) db.cfgM = now;
+  try { localStorage.setItem('acc_base_rows', JSON.stringify(baseRows)); } catch(e) {}
+  let before = {}; try { before = JSON.parse(snap.cfg || '{}'); } catch(e) {}
+  const after = sharedConfig(db.cfg); if (typeof db.cfgM == 'number') { const legacy = db.cfgM; db.cfgM = {}; CFG_SYNC_FIELDS.forEach(k => db.cfgM[k] = legacy); } else db.cfgM = db.cfgM && typeof db.cfgM == 'object' ? db.cfgM : {};
+  new Set([...Object.keys(before), ...Object.keys(after)]).forEach(k => { if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) db.cfgM[k] = now; });
   snapAll();
 }
 const lmv = (x, pid, k) => S(['sales', 'purchases', 'sret', 'pret'].flatMap(c => (x[c]||[]).filter(r => r.product == pid && nk(r.w) === k && !(r.workflow===2 && (c==='sales'||c==='purchases'))).map(r => ST[c] * r.qty)), v => v) + S((x.deliveries||[]).filter(r=>r.product==pid&&nk(r.warehouse)===k),r=>-r.qty) + S((x.receipts||[]).filter(r=>r.product==pid&&nk(r.warehouse)===k),r=>r.qty) + S((x.adj||[]).filter(r => r.product == pid && nk(r.w) === k), r => r.diff) + S((x.xfer || []).filter(r => r.product == pid), r => { const [f, t] = xf(r); return (t === k ? r.qty : 0) - (f === k ? r.qty : 0); });
@@ -1359,10 +1374,11 @@ function mergeDb(L, R){
     Object.keys(dr).forEach(id => dl[id] = Math.max(dl[id] || 0, dr[id]));
     const mp = new Map();
     (R[c] || []).forEach(r => mp.set(r.id, {r, side: 'R'}));
-    (L[c] || []).forEach(r => { const o = mp.get(r.id); if (!o || (r._m || 0) >= (o.r._m || 0)) mp.set(r.id, {r, side: 'L'}); });
+    (L[c] || []).forEach(r => { const o = mp.get(r.id), lm = r._m || 0, rm = o ? (o.r._m || 0) : -1; if (!o || lm > rm || (lm === rm && jx(r) > jx(o.r))) mp.set(r.id, {r, side: 'L'}); });
     out[c] = []; out._del[c] = {};
-    mp.forEach(({r, side}, id) => { if ((dl[id] || 0) > (r._m || 0)) return; r._side = side; out[c].push(r); });
-    Object.keys(dl).forEach(id => { if (now - dl[id] < DAY) out._del[c][id] = dl[id]; });
+    mp.forEach(({r, side}, id) => { if (dl[id] && (dl[id] || 0) >= (r._m || 0)) return; r._side = side; out[c].push(r); });
+    // احتفظ بعلامات الحذف حتى لا تعود السجلات القديمة من جهاز ظل غير متصل فترة طويلة.
+    Object.keys(dl).forEach(id => { out._del[c][id] = dl[id]; });
   });
   const Lc = {}, Rc = {}; SYNC_COLS.forEach(c => { Lc[c] = L[c] || []; Rc[c] = R[c] || []; });
   out.products.forEach(p => {                       // المخزون = الرصيد الافتتاحي + حركات الفواتير والجرد بعد الدمج
@@ -1373,12 +1389,32 @@ function mergeDb(L, R){
     if (ks.size) { p.wx = p.wx || {}; ks.forEach(k => { const a = r2((+p.wx[k] || 0) - lmv(src, p.id, k)); p.wx[k] = r2(a + lmv(out, p.id, k)); }); }
   });
   SYNC_COLS.forEach(c => out[c].forEach(r => delete r._side));
-  const rs = R.shared;
-  if (rs && (rs.m || 0) > (L.cfgM || 0)) { out.cfg = Object.assign({}, L.cfg, {name: rs.name, cash0: rs.cash0}, ('closeDate' in rs && /^(\d{4}-\d{2}-\d{2})?$/.test(String(rs.closeDate))) ? {closeDate: rs.closeDate} : {}); out.cfgM = rs.m; } else out.cfgM = L.cfgM || 0;
-  out.cfg.locs = Object.values(Object.fromEntries([...((rs && Array.isArray(rs.locs)) ? rs.locs : []), ...((L.cfg && L.cfg.locs) || [])].filter(l => l && l.id && l.name).map(l => [l.id, l])));
+  // مزامنة إعدادات الشركة حقلًا بحقل؛ لا تستبدل إعدادًا محليًا غير متعلق بتعديل الجهاز الآخر.
+  const rs = R.shared || {}, rcfg = rs.cfg || R.cfg || {}, rmeta = rs.cfgM || R.cfgM || {}, lmeta = L.cfgM || {};
+  out.cfg = Object.assign({}, L.cfg || {}); out.cfgM = {};
+  CFG_SYNC_FIELDS.forEach(k => {
+    const ls = cfgStamp(lmeta, k, typeof lmeta == 'number' ? lmeta : 0);
+    const legacyRemote = +rs.m || 0, rts = cfgStamp(rmeta, k, legacyRemote);
+    out.cfgM[k] = Math.max(ls, rts);
+    if (Object.prototype.hasOwnProperty.call(rcfg, k) && (rts > ls || (rts === ls && rts > 0 && JSON.stringify(rcfg[k]) > JSON.stringify((L.cfg || {})[k])))) out.cfg[k] = cloneSync(rcfg[k]);
+    else if (Object.prototype.hasOwnProperty.call(rcfg, k) && ls === 0 && rts === 0) {
+      const lv = (L.cfg || {})[k], rv = rcfg[k];
+      const localDefault = k === 'name' ? (!lv || lv === 'شركتي') : k === 'cash0' ? !Number(lv) : k === 'dark' ? !lv : k === 'logo' ? !lv : k === 'closeDate' ? !lv : (Array.isArray(lv) && lv.length === 0);
+      const remoteHasValue = k === 'users' || k === 'locs' ? Array.isArray(rv) && rv.length > 0 : k === 'logo' ? !!rv : k === 'name' ? !!rv && rv !== 'شركتي' : k === 'closeDate' ? !!rv : k === 'dark' ? !!rv : !!rv;
+      if (localDefault && remoteHasValue) out.cfg[k] = cloneSync(rv);
+      else if ((k === 'users' || k === 'locs') && Array.isArray(lv) && Array.isArray(rv)) out.cfg[k] = [...new Map([...lv, ...rv].map(x => [k === 'users' ? String(x.u || '').toLowerCase() : String(x.id || ''), x])).values()];
+    }
+  });
+  // توافق مع النسخ القديمة التي كانت ترسل اسم الشركة والمخازن فقط.
+  if (!rs.cfg && rs.m) {
+    if (rs.m > cfgStamp(lmeta, 'name', 0) && typeof rs.name == 'string') out.cfg.name = rs.name;
+    if (rs.m > cfgStamp(lmeta, 'cash0', 0) && isFinite(+rs.cash0)) out.cfg.cash0 = +rs.cash0;
+    if (Array.isArray(rs.locs) && rs.m > cfgStamp(lmeta, 'locs', 0)) out.cfg.locs = cloneSync(rs.locs);
+    if (rs.closeDate !== undefined && rs.m > cfgStamp(lmeta, 'closeDate', 0)) out.cfg.closeDate = rs.closeDate;
+  }
   return out;
 }
-const payload = () => { const p = {v: 1, at: Date.now(), _del: db._del || {}, shared: {name: db.cfg.name, cash0: db.cfg.cash0, m: db.cfgM || 0, locs: db.cfg.locs || [], closeDate: db.cfg.closeDate || ''}}; SYNC_COLS.forEach(c => p[c] = db[c]); return p; };
+const payload = () => { const p = {v: 2, at: Date.now(), _del: db._del || {}, cfg: sharedConfig(db.cfg), cfgM: db.cfgM || {}, shared: {cfg: sharedConfig(db.cfg), cfgM: db.cfgM || {}, name: db.cfg.name, cash0: db.cfg.cash0, m: Math.max(0, ...Object.values(db.cfgM || {}).map(Number).filter(Number.isFinite)), locs: db.cfg.locs || [], closeDate: db.cfg.closeDate || ''}}; SYNC_COLS.forEach(c => p[c] = db[c]); return p; };
 
 // --- مزامنة بالملف (من غير جوجل) ---
 // النسخة الاحتياطية بتتحفظ كملف، والزر "تحديث" بيدمج أي ملف جديد مع بياناتك (مش بيمسح حاجة).
@@ -1685,7 +1721,7 @@ async function srvSync(quiet){
   if (srvLocked()) return false;
   if (modalOpen()) { srvSoon(5000); return false; }
   srvBusy = true; if (!quiet) srvSet('🔄 جاري المزامنة...');
-  let changedAny = false;
+  let changedAny = false, completed = false;
   try {
     const url = (SRV_URL || c.url).replace(/\/+$/, '') + '/v1/' + encodeURIComponent(c.ws), H = {Authorization: 'Bearer ' + srvTok(c)}, ck = await srvKey(c);
     for (let i = 0; i < 4; i++) {
@@ -1696,14 +1732,15 @@ async function srvSync(quiet){
       else if (r.ok) { const j = await r.json(); c.off = Math.round(j.t - (t0 + t1) / 2); ver = j.v; if (mergeText(await srvDec(ck, j.blob))) changedAny = true; }
       else throw new Error('السيرفر رد بخطأ ' + r.status);
       const cur = canon();
-      if (ver > 0 && cur === c.up && ver === c.v) break;      // مفيش جديد نرفعه
+      if (ver > 0 && cur === c.up && ver === c.v) { completed = true; break; }      // مفيش جديد نرفعه
       const p = await fetch(url, {method: 'PUT', headers: Object.assign({'Content-Type': 'application/json'}, H), body: JSON.stringify({base: ver, blob: await srvEnc(ck, bk())})});
-      if (p.ok) { const j = await p.json(); c.v = j.v; c.up = cur; break; }
+      if (p.ok) { const j = await p.json(); c.v = j.v; c.up = cur; completed = true; break; }
       if (p.status == 409) continue;
       if (p.status == 401 || p.status == 403) throw new Error('السيرفر رفض الرفع (' + p.status + ')');
       throw new Error('تعذر الرفع (' + p.status + ')');
     }
-    c.last = Date.now(); try { localStorage.setItem('acc2', JSON.stringify(db)); } catch (e) {}
+    if (!completed) throw new Error('حدث تعارض متكرر أثناء المزامنة؛ لم يتم تأكيد رفع كل التغييرات. أعد المحاولة.');
+    c.last = Date.now(); try { localStorage.removeItem('acc_base_rows'); localStorage.setItem('acc2', JSON.stringify(db)); } catch (e) {}
     if (window.api) try { window.api.save(JSON.stringify(db)); } catch (e) {}
     srvSet('✅ ' + new Date(c.last).toLocaleTimeString('ar-EG') + (changedAny ? ' (اتدمجت تعديلات جديدة)' : ''));
     if (changedAny && !modalOpen()) { menu(); render(); }
@@ -2111,20 +2148,41 @@ function locTxt(rows){ const w = [...new Set(rows.map(r => nk(r.w)))]; return (w
 function lcCh(sel){ const w = sel.value; sel.parentNode.querySelectorAll('select:not(.lc) option').forEach(o => { const p = db.products.find(x => x.id == o.value); if (p) o.textContent = p.name + ' — المتاح ' + locQty(p, w); }); }
 locCh = function(){ document.querySelectorAll('#ls .lc').forEach(s => { s.value = $('f_loc').value; lcCh(s); }); };
 
-// ---------- تعارض المزامنة ----------
+// ---------- تعارض المزامنة: أرشيف كامل ومتزامن ----------
 const sigOf = r => JSON.stringify(Object.keys(r).filter(k => k != '_m' && k != '_side').sort().map(k => [k, r[k]]));
-const getConf = () => { try { return JSON.parse(localStorage.getItem('acc_conf') || '[]'); } catch (e) { return []; } };
+const getConf = () => Array.isArray(db.syncConflicts) ? db.syncConflicts : (db.syncConflicts = []);
+const conflictKey = (c, id, a, b) => { const pair=[String(a._m||0)+'|'+sigOf(a),String(b._m||0)+'|'+sigOf(b)].sort(); return 'cf_' + hex(sha(U8([c,id,...pair].join('|')))).slice(0,32); };
 { const m0 = mergeDb; mergeDb = function(L, R){
-  const base = +localStorage.getItem('acc_ls') || 0, cf = [];
-  if (base) Object.keys(M).forEach(c => { if (c == 'log') return; const mp = new Map((R[c] || []).map(r => [r.id, r])); (L[c] || []).forEach(l => { const r = mp.get(l.id); if (r && (l._m || 0) > base && (r._m || 0) > base && sigOf(l) !== sigOf(r)) { const lw = (l._m || 0) >= (r._m || 0); cf.push({at: Date.now(), c, win: lw ? 'جهازك' : 'الجهاز التاني', kept: (lw ? l : r), lost: (lw ? r : l)}); } }); });
-  const out = m0(L, R);
-  try { localStorage.setItem('acc_ls', String(Date.now())); if (cf.length) localStorage.setItem('acc_conf', JSON.stringify([...cf.map(x => ({at: x.at, coll: (M[x.c] || {}).t || x.c, win: x.win, kept: recDesc(x.c, x.kept), lost: recDesc(x.c, x.lost)})), ...getConf()].slice(0, 60))); } catch (e) {}
-  if (cf.length) { try { alert('⚠️ فيه ' + cf.length + ' تعارض في المزامنة (نفس السجل اتعدل على جهازين). النسخة الأحدث كسبت — راجع الإعدادات ← تعارضات المزامنة'); } catch (e) {} }
-  return out; }; }
+  const base = +localStorage.getItem('acc_ls') || 0, cf = [], oldRows = (() => { try { return JSON.parse(localStorage.getItem('acc_base_rows') || '{}'); } catch(e) { return {}; } })();
+  if (base) Object.keys(M).forEach(c => { if (c == 'log') return; const mp = new Map((R[c] || []).map(r => [r.id, r])); (L[c] || []).forEach(l => { const r = mp.get(l.id); if (r && (l._m || 0) > base && (r._m || 0) > base && sigOf(l) !== sigOf(r)) { const lw = (l._m || 0) > (r._m || 0) || ((l._m || 0) === (r._m || 0) && jx(l) > jx(r)); cf.push({id: conflictKey(c,l.id,l,r), at: Date.now(), c, recId: l.id, base: oldRows[c+'|'+l.id] || null, local: l, remote: r, kept: lw ? l : r, lost: lw ? r : l, winner: lw ? 'local' : 'remote', resolved: false, _m: Date.now()}); } }); });
+  const out = m0(L, R); out.syncConflicts = out.syncConflicts || [];
+  if (cf.length) {
+    const have = new Set(out.syncConflicts.map(x => x.id));
+    cf.forEach(x => { if (!have.has(x.id)) out.syncConflicts.push(x); delete oldRows[x.c+'|'+x.recId]; });
+    try { localStorage.setItem('acc_base_rows', JSON.stringify(oldRows)); } catch(e) {}
+    try { alert('⚠️ تم اكتشاف ' + cf.length + ' تعارض. تم حفظ النسخة السابقة والتعديلين في سجل تعارضات المزامنة للمراجعة.'); } catch(e) {}
+  }
+  try { localStorage.setItem('acc_ls', String(Date.now())); } catch(e) {}
+  return out;
+}; }
+function confPretty(v){ try { return esc(JSON.stringify(v, null, 2)); } catch(e) { return esc(String(v)); } }
+function resolveConflict(id, choice){
+  const x = getConf().find(z => z.id === id); if (!x || x.resolved) return;
+  const selected = choice === 'base' ? x.base : choice === 'local' ? x.local : x.remote;
+  if (selected && x.c && Array.isArray(db[x.c])) {
+    const at = db[x.c].findIndex(r => r.id === x.recId);
+    if (at >= 0) db[x.c].splice(at, 1);
+    if (selected !== '__DELETE__') { const row = cloneSync(selected); row._m = NOWS(); db[x.c].push(row); }
+    db._del = db._del || {}; db._del[x.c] = db._del[x.c] || {};
+    if (selected === '__DELETE__') db._del[x.c][x.recId] = NOWS(); else delete db._del[x.c][x.recId];
+    x.resolved = true; x.resolution = choice; x.resolvedAt = Date.now(); x._m = NOWS();
+    store0(); render();
+  } else { alert('لا توجد نسخة قديمة محفوظة لهذا السجل؛ يمكنك مراجعة نسختي التعديل المحفوظتين.'); }
+}
 function confSec(){
-  const a = getConf();
-  return `<small style="color:var(--m)">لما نفس السجل (فاتورة مثلًا) يتعدّل على جهازين قبل المزامنة، النسخة الأحدث بتكسب وبيتسجّل هنا اللي ضاع عشان تراجعه.</small>
-  <div style="margin:8px 0">${a.map(x => `<div class="pan" style="padding:8px;margin-bottom:6px"><small>${new Date(x.at).toLocaleString('ar-EG')} — ${esc(x.coll)} — كسب: ${esc(x.win)}</small><div class="row"><span>✅ اللي اتحفظ</span><span>${esc(x.kept)}</span></div><div class="row"><span>❌ اللي ضاع</span><span>${esc(x.lost)}</span></div></div>`).join('') || '<small>لا توجد تعارضات</small>'}</div>${a.length ? '<button class="btn n" onclick="localStorage.removeItem(\'acc_conf\');render()">مسح القائمة</button>' : ''}`;
+  const a = getConf().slice().sort((x,y)=>(y.at||0)-(x.at||0));
+  return `<small style="color:var(--m)">كل تعارض محفوظ بنسخه: النسخة السابقة إن كانت متاحة، وتعديل الجهاز المحلي، والتعديل القادم من المزامنة، والنسخة التي اعتمدها النظام. السجل محفوظ داخل بيانات الشركة ويتزامن مع الأجهزة.</small>
+  <div style="margin:8px 0">${a.map(x => { const coll=(M[x.c]||{}).t||x.c, old=x.base; return `<details class="pan" style="padding:9px;margin-bottom:8px"><summary style="cursor:pointer"><b>${esc(coll)}</b> — ${new Date(x.at||0).toLocaleString('ar-EG')} — ${x.resolved?'تمت المراجعة':'يحتاج مراجعة'}</summary><div style="margin-top:8px"><div><b>السجل:</b> ${esc(x.recId||'')}</div><div style="margin-top:7px"><b>النسخة القديمة قبل التعديل:</b></div><pre style="white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto;background:var(--bg);padding:7px;border-radius:7px">${old ? confPretty(old) : 'غير متاحة في هذه الحالة؛ بدأ تتبع النسخة القديمة بعد هذا التحديث.'}</pre><div><b>التعديل المحلي:</b></div><pre style="white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto;background:var(--bg);padding:7px;border-radius:7px">${confPretty(x.local)}</pre><div><b>التعديل القادم من الجهاز الآخر:</b></div><pre style="white-space:pre-wrap;word-break:break-word;max-height:180px;overflow:auto;background:var(--bg);padding:7px;border-radius:7px">${confPretty(x.remote)}</pre><div><b>النسخة التي اعتمدها الدمج:</b> ${esc(x.winner==='local'?'التعديل المحلي':'التعديل القادم من الجهاز الآخر')}</div>${x.resolved ? `<small>تم اختيار ${esc(x.resolution)} بتاريخ ${new Date(x.resolvedAt||0).toLocaleString('ar-EG')}</small>` : `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px"><button class="btn sm p" onclick="resolveConflict('${esc(x.id)}','local')">اعتماد التعديل المحلي</button><button class="btn sm p" onclick="resolveConflict('${esc(x.id)}','remote')">اعتماد تعديل الجهاز الآخر</button>${old ? `<button class="btn sm w" onclick="resolveConflict('${esc(x.id)}','base')">استرجاع النسخة القديمة</button>` : ''}</div>`}</div></details>`; }).join('') || '<small>لا توجد تعارضات مسجلة</small>'}</div>`;
 }
 
 // ---------- المستخدمون ----------
